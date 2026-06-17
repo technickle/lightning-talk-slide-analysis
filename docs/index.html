@@ -125,6 +125,19 @@ function startAuto(){ setActiveBtn('auto');
 }
 function beginOrbit(){ auto=true; isOrtho=false; vTh=0.0010; vPh=0.0004; vR=0; vZ=0;
   const r=activeCam.position.distanceTo(controls.target); zMin=r*0.8; zMax=r*1.28; }
+function toPerspective(){   // "inflate" the current flat ortho view into the same view in perspective
+  const dir = activeCam.position.clone().sub(controls.target).normalize();
+  const vh = VIEW / activeCam.zoom, dStart = 1000;
+  const zStart = dStart*Math.tan(perspCam.fov*Math.PI/360)/vh, upNow = activeCam.up.clone();
+  useCam(perspCam); perspCam.up.copy(upNow);
+  perspCam.position.copy(controls.target).add(dir.clone().multiplyScalar(dStart));
+  perspCam.zoom = zStart; perspCam.updateProjectionMatrix();
+  tw={ t:0, spd:0.03,
+       fromP:perspCam.position.clone(), toP:controls.target.clone().add(dir.clone().multiplyScalar(220)),
+       fromU:upNow.clone(),             toU:upNow.clone(),         // keep orientation -> depth emerges in place
+       fromT:controls.target.clone(),   toT:controls.target.clone(),
+       fromZ:zStart,                    toZ:1, onDone:null };
+}
 function autoStep(){
   vTh=Math.max(-A_MAXTH, Math.min(A_MAXTH, (vTh+(Math.random()-0.5)*A_ACC)*0.9997));
   vPh=Math.max(-A_MAXPH, Math.min(A_MAXPH, (vPh+(Math.random()-0.5)*A_ACC*0.6)*0.9997));
@@ -154,7 +167,11 @@ const go = v => v==='auto' ? startAuto() : applyView(v);
 // real user interaction (drag/zoom/click) stops auto and un-highlights the preset; our tween doesn't
 controls.addEventListener('start', ()=>{ dragging=true; if(auto){ auto=false; clearActiveBtn(); } });
 controls.addEventListener('end',   ()=>{ dragging=false; });
-controls.addEventListener('change',()=>{ if(dragging && currentPreset) clearActiveBtn(); });
+controls.addEventListener('change', ()=>{
+  if(!dragging) return;
+  if(currentPreset) clearActiveBtn();
+  if(activeCam.isOrthographicCamera && !tw) toPerspective();   // drag/zoom out of a flat view -> back to 3D
+});
 document.querySelectorAll('#views button').forEach(b=> b.addEventListener('click', ()=> go(b.dataset.v)));
 addEventListener('keydown', e=>{ const m={'0':'auto','1':'speakers','2':'speakertopic','3':'datetopic'}[e.key];
   if(m) go(m); });
