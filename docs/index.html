@@ -1,0 +1,245 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  html,body{margin:0;height:100%;background:#000;font-family:system-ui,sans-serif;}
+  #app{position:absolute;inset:0;} canvas{display:block;}
+  #tip{position:fixed;pointer-events:none;background:rgba(20,20,24,.96);border:1px solid #555;
+       border-radius:6px;padding:6px 8px;font-size:12px;max-width:330px;color:#eee;
+       opacity:0;transition:opacity .22s ease;box-shadow:0 2px 10px rgba(0,0,0,.5);z-index:10;}
+  .lbl{font-size:11px;color:#aaa;white-space:nowrap;pointer-events:none;}
+  .tlbl{font-size:11px;color:#ccc;white-space:nowrap;pointer-events:auto;cursor:pointer;}
+  .tlbl.on{color:#fff;font-weight:600;}
+  #hint{position:fixed;top:8px;left:10px;font-size:12px;color:#999;z-index:10;}
+  #views{position:fixed;top:8px;right:10px;z-index:10;display:flex;gap:4px;}
+  #views button{font:11px system-ui;background:#1c1c22;color:#ccc;border:1px solid #555;
+    border-radius:4px;padding:3px 7px;cursor:pointer;}
+  #views button:hover{background:#2a2a33;color:#fff;}
+  #views button.active{background:#3a3a46;color:#fff;border-color:#999;}
+</style></head><body>
+<div id="app"></div><div id="tip"></div>
+<div id="hint">x = date · y = speaker · z = topic · drag to orbit · hover for description · click a node or a topic label to lock</div>
+<div id="views">
+  <button data-v="iso">reset (0)</button><button data-v="speakers">speaker × date (1)</button>
+  <button data-v="datetopic">date × topic (2)</button><button data-v="speakertopic">speaker × topic (3)</button>
+</div>
+
+<!-- data emitted by the notebook (window.TALK_DATA) -->
+<script src="talk_space_data.js"></script>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+"three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+const D = window.TALK_DATA;
+const W=160, DEP=120, H=90, xmin=D.xmin, xmax=D.xmax, nY=D.nY, nZ=D.nZ;
+const sx = v => ((xmax>xmin)?(v-xmin)/(xmax-xmin):0.5)*W - W/2;   // date   -> world X
+const sy = v => ((nY>1)?v/(nY-1):0.5)*DEP - DEP/2;               // speaker-> world Z
+const sz = v => ((nZ>1)?v/(nZ-1):0.5)*H - H/2;                   // topic  -> world Y (up)
+
+// dot sizes (world units) + how hard off-topic dots fade (tune here)
+const DOT = { base:1.5, sel:2.4, fade:1.0, fadeDim:0.16 };   // world-unit radii + faded brightness
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const fmtDate = iso => { const [y,m] = String(iso).split('-'); return (MON[(+m)-1]||'?')+' '+y; };  // 2026-09-15 -> Sep 2026
+
+// (speakers are 3D meshes now; the star-sprite texture is no longer used)
+// (talk dots are 3D spheres now; the circle sprite texture is no longer used)
+
+const app=document.getElementById('app');
+const scene=new THREE.Scene(); scene.background=new THREE.Color('#000000');
+const aspect = () => app.clientWidth/app.clientHeight;
+const perspCam = new THREE.PerspectiveCamera(55, aspect(), 0.1, 8000);
+perspCam.position.set(W*0.62, H*1.05, DEP*0.98);
+const VIEW = Math.max(W,DEP,H)*0.62;              // ortho half-height (world units)
+const orthoCam = new THREE.OrthographicCamera(-VIEW*aspect(), VIEW*aspect(), VIEW, -VIEW, -4000, 8000);
+orthoCam.position.copy(perspCam.position);
+let activeCam = perspCam;
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(window.devicePixelRatio); renderer.setSize(app.clientWidth, app.clientHeight);
+app.appendChild(renderer.domElement);
+const lr=new CSS2DRenderer(); lr.setSize(app.clientWidth, app.clientHeight);
+lr.domElement.style.position='absolute'; lr.domElement.style.top='0'; lr.domElement.style.left='0';
+lr.domElement.style.pointerEvents='none'; app.appendChild(lr.domElement);
+const controls=new OrbitControls(activeCam, renderer.domElement); controls.enableDamping=true;
+function useCam(cam){ if(cam!==activeCam){ cam.position.copy(activeCam.position); cam.up.copy(activeCam.up);
+  activeCam=cam; controls.object=cam; } }
+
+// preset views (scene is centered at the origin). ortho views collapse the axis we look down.
+// ortho views carry their content half-extents (hw,hh) so we can zoom to fill
+const VIEWS = {
+  iso:          {cam:'persp', pos:[W*0.62, H*1.05, DEP*0.98], up:[0,1,0]},
+  speakers:     {cam:'ortho', pos:[0, 1000, 0],  up:[0,0,-1], hw:W/2,   hh:DEP/2},  // top-down: topic collapses -> speaker × date
+  datetopic:    {cam:'ortho', pos:[0, 0, 1000],  up:[0,1,0],  hw:W/2,   hh:H/2},    // front: date (x) vs topic (y)
+  speakertopic: {cam:'ortho', pos:[1000, 0, 0],  up:[0,1,0],  hw:DEP/2, hh:H/2},    // side: speaker vs topic
+};
+const MARGIN=1.16;
+let tw=null, currentPreset=null, programmatic=false;
+const allBtns=()=>document.querySelectorAll('#views button');
+function setActiveBtn(v){ currentPreset=v; allBtns().forEach(b=> b.classList.toggle('active', b.dataset.v===v)); }
+function clearActiveBtn(){ currentPreset=null; allBtns().forEach(b=> b.classList.remove('active')); }
+function applyView(v){ const V=VIEWS[v]; if(!V) return; programmatic=true; setActiveBtn(v);
+  useCam(V.cam==='ortho'?orthoCam:perspCam);
+  const zoom = V.cam==='ortho' ? Math.min(VIEW/(V.hh*MARGIN), VIEW*aspect()/(V.hw*MARGIN)) : 1;
+  tw={ t:0, fromP:activeCam.position.clone(), toP:new THREE.Vector3(...V.pos),
+       fromU:activeCam.up.clone(),            toU:new THREE.Vector3(...V.up),
+       fromT:controls.target.clone(),         toT:new THREE.Vector3(0,0,0),
+       fromZ:activeCam.zoom,                  toZ:zoom }; }
+// a user-driven camera change (drag/zoom) un-highlights the preset; our own tween doesn't
+controls.addEventListener('change', ()=>{ if(!programmatic && currentPreset) clearActiveBtn(); });
+document.querySelectorAll('#views button').forEach(b=> b.addEventListener('click', ()=> applyView(b.dataset.v)));
+addEventListener('keydown', e=>{ const m={'0':'iso','1':'speakers','2':'datetopic','3':'speakertopic'}[e.key];
+  if(m) applyView(m); });
+applyView('iso');   // start on the reset view + highlight its button
+
+// talk points: plain white circles via PointsMaterial (renders everywhere, like the
+// stars; a custom gl_PointSize shader didn't show in some WebGL/preview contexts).
+// Per-point fade = vertex colours; the selected topic's (larger) dots get redrawn by a
+// second overlay cloud.
+// talk dots as an InstancedMesh of small spheres — world geometry, so they scale exactly like
+// the speaker stars in every camera/zoom (PointsMaterial point sizes don't track ortho zoom).
+const N=D.talks.length;
+const tpos=new Float32Array(N*3);
+D.talks.forEach((t,i)=>{ tpos[i*3]=sx(t.x); tpos[i*3+1]=sz(t.z); tpos[i*3+2]=sy(t.y); });
+const DOTY=new THREE.Color(0xf3c220);                              // talk colour (yellow)
+const dotGeo=new THREE.SphereGeometry(1, 10, 8);
+const dots=new THREE.InstancedMesh(dotGeo, new THREE.MeshBasicMaterial({color:0xffffff}), N);
+const _d=new THREE.Object3D(), _c=new THREE.Color();
+const dotR=new Float32Array(N).fill(DOT.base), dotB=new Float32Array(N).fill(1);   // current radius + brightness
+function setDot(i, r, b){ _d.position.set(tpos[i*3], tpos[i*3+1], tpos[i*3+2]); _d.scale.setScalar(r); _d.updateMatrix();
+  dots.setMatrixAt(i, _d.matrix); dots.setColorAt(i, _c.setRGB(DOTY.r*b, DOTY.g*b, DOTY.b*b)); }
+for(let i=0;i<N;i++) setDot(i, DOT.base, 1);
+dots.instanceMatrix.needsUpdate=true; dots.instanceColor.needsUpdate=true;
+scene.add(dots);
+
+// speaker "stars"
+// speakers as 3D star polyhedra (stella octangula) — real shaded geometry, white
+scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+const _dl=new THREE.DirectionalLight(0xffffff, 0.85); _dl.position.set(1, 1.6, 1.2); scene.add(_dl);
+const _t1=new THREE.TetrahedronGeometry(1);
+const _t2=_t1.clone(); _t2.applyMatrix4(new THREE.Matrix4().makeScale(-1,-1,-1));   // dual -> stella octangula
+const starGeo=mergeGeometries([_t1,_t2]);
+starGeo.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(Math.PI/4, Math.PI/4, 0)));  // off-axis so flat views aren't square
+starGeo.computeVertexNormals();
+const starMeshes=[];
+D.speakers.forEach((s,i)=>{ const m=new THREE.Mesh(starGeo,
+    new THREE.MeshStandardMaterial({color:0xffffff, flatShading:true, roughness:0.45, metalness:0.0, side:THREE.DoubleSide}));
+  m.position.set(sx(s.x), sz(s.z), sy(s.y)); m.scale.setScalar(3.4); m.userData.i=i; scene.add(m); starMeshes.push(m); });
+
+// per-speaker line fans
+const lineMat={};
+D.edges.forEach(e=>{
+  const g=new THREE.BufferGeometry(), pos=[];
+  e.segs.forEach(s=>{ pos.push(sx(s[0]),sz(s[2]),sy(s[1]), sx(s[3]),sz(s[5]),sy(s[4])); });
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+  const m=new THREE.LineBasicMaterial({color:0x777777, transparent:true, opacity:0.4});
+  scene.add(new THREE.LineSegments(g,m)); lineMat[e.speaker]=m;
+});
+// line / dot / star styling is driven by the animated highlight system (applyState + stepHighlight)
+
+// axis edges + labels (z labels clickable)
+function addLine(a,b){ scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([a,b]),
+  new THREE.LineBasicMaterial({color:0x888888}))); }
+const x0=-W/2-3, z0=DEP/2+3, yb=-H/2;
+addLine(new THREE.Vector3(-W/2,yb,z0), new THREE.Vector3(W/2,yb,z0));
+addLine(new THREE.Vector3(x0,-H/2,z0), new THREE.Vector3(x0,H/2,z0));
+function label(txt,x,y,z,cls){ const d=document.createElement('div'); d.className=cls||'lbl'; d.textContent=txt;
+  const o=new CSS2DObject(d); o.position.set(x,y,z); scene.add(o); return d; }
+for(let yr=Math.ceil(xmin); yr<=Math.floor(xmax); yr++) label(yr, sx(yr), yb-3, z0+2);
+const topicEls={};
+D.topics.forEach((t,i)=>{ const el=label(t, x0-2, sz(i), z0, 'tlbl'); topicEls[t]=el;
+  el.addEventListener('click', e=>{ e.stopPropagation(); toggleTopic(t); }); });
+
+// highlight state: one lock at a time (speaker | topic)
+let appliedKey='', locked=null;
+const keyOf = s => s ? s.kind+':'+s.value : '';
+// ---- animated highlight (~0.5s eased transition between states) ----
+const HL_DUR=500;
+const C_RESET=new THREE.Color(0x777777), C_WHITE=new THREE.Color(0xffffff), C_DARK=new THREE.Color(0x333333);
+const lineTarget={}, lineFrom={};
+const dotFromR=new Float32Array(N), dotToR=new Float32Array(N), dotFromB=new Float32Array(N), dotToB=new Float32Array(N);
+const SN=D.speakers.length, starTarget=new Float32Array(SN), starFrom=new Float32Array(SN);
+let hlT0=null;
+
+function applyState(s){
+  // snapshot current (FROM)
+  for(const sp in lineMat){ lineFrom[sp]={c:lineMat[sp].color.clone(), o:lineMat[sp].opacity}; }
+  dotFromR.set(dotR); dotFromB.set(dotB);
+  for(let i=0;i<SN;i++) starFrom[i]=starMeshes[i].material.color.r;
+  // selection predicates
+  for(const t in topicEls) topicEls[t].classList.remove('on');
+  let sel=null, starSet=null;
+  if(s && s.kind==='speaker'){ sel=i=>D.talks[i].sp===s.value; }
+  else if(s && s.kind==='topic'){ sel=i=>D.talks[i].topic===s.value;
+    starSet=new Set(D.talks.filter(t=>t.topic===s.value).map(t=>t.sp));
+    if(topicEls[s.value]) topicEls[s.value].classList.add('on'); }
+  // TARGETS
+  for(const sp in lineMat){ let c,o;
+    if(!s){ c=C_RESET; o=0.4; }
+    else if(s.kind==='speaker'){ if(sp===s.value){ c=C_WHITE; o=1; } else { c=C_DARK; o=0.05; } }
+    else { c=C_DARK; o=0.04; }
+    lineTarget[sp]={c,o}; }
+  for(let i=0;i<N;i++){ const on=!sel||sel(i);
+    dotToR[i] = sel ? (on?DOT.sel:DOT.fade) : DOT.base;
+    dotToB[i] = on ? 1 : DOT.fadeDim; }
+  for(let i=0;i<SN;i++){ const nm=D.speakers[i].name;
+    starTarget[i] = !s ? 1 : (s.kind==='speaker' ? (nm===s.value?1:0.12) : (starSet.has(nm)?1:0.12)); }
+  hlT0 = performance.now();
+}
+function stepHighlight(){
+  if(hlT0===null) return;
+  let p=(performance.now()-hlT0)/HL_DUR; if(p>1) p=1; const e=p*p*(3-2*p);
+  for(const sp in lineMat){ const m=lineMat[sp], f=lineFrom[sp], t=lineTarget[sp];
+    m.color.setRGB(f.c.r+(t.c.r-f.c.r)*e, f.c.g+(t.c.g-f.c.g)*e, f.c.b+(t.c.b-f.c.b)*e);
+    m.opacity = f.o+(t.o-f.o)*e; }
+  for(let i=0;i<N;i++){ const r=dotFromR[i]+(dotToR[i]-dotFromR[i])*e, b=dotFromB[i]+(dotToB[i]-dotFromB[i])*e;
+    setDot(i, r, b); dotR[i]=r; dotB[i]=b; }
+  dots.instanceMatrix.needsUpdate=true; dots.instanceColor.needsUpdate=true;
+  for(let i=0;i<SN;i++){ const b=starFrom[i]+(starTarget[i]-starFrom[i])*e;
+    starMeshes[i].material.color.setRGB(b,b,b); }
+  if(p>=1) hlT0=null;
+}
+function render(s){ const k=keyOf(s); if(k===appliedKey) return; appliedKey=k; applyState(s); }
+function toggleTopic(t){ const s={kind:'topic',value:t};
+  if(keyOf(s)===keyOf(locked)){ locked=null; render(null); } else { locked=s; render(s); } }
+
+const ray=new THREE.Raycaster(); ray.params.Points.threshold=2.6; const m2=new THREE.Vector2();
+const tip=document.getElementById('tip');
+function pick(ev){ const r=renderer.domElement.getBoundingClientRect();
+  m2.x=((ev.clientX-r.left)/r.width)*2-1; m2.y=-((ev.clientY-r.top)/r.height)*2+1;
+  ray.setFromCamera(m2,activeCam);
+  const hs=ray.intersectObjects(starMeshes); if(hs.length) return {kind:'speaker', i:hs[0].object.userData.i};
+  const ht=ray.intersectObject(dots); if(ht.length) return {kind:'talk', i:ht[0].instanceId};
+  return null; }
+const nameOf = p => p.kind==='speaker' ? D.speakers[p.i].name : D.talks[p.i].sp;
+renderer.domElement.addEventListener('pointermove', ev=>{
+  const p=pick(ev);
+  if(p){ tip.innerHTML = p.kind==='speaker'
+      ? '<b>'+D.speakers[p.i].name+'</b><br>'+D.speakers[p.i].talks+' talks'+(D.speakers[p.i].blurb?'<br><i>'+D.speakers[p.i].blurb+'</i>':'')
+      : (D.talks[p.i].summary||'(no description)')+'<br><i>'+D.talks[p.i].spk+' · '+fmtDate(D.talks[p.i].date)+' · '+D.talks[p.i].topic+' · slide '+D.talks[p.i].idx+'</i>';
+    tip.style.opacity='1'; tip.style.left=(ev.clientX+12)+'px'; tip.style.top=(ev.clientY+12)+'px';
+    if(!locked) render({kind:'speaker', value:nameOf(p)});
+  } else { tip.style.opacity='0'; if(!locked) render(null); }
+});
+renderer.domElement.addEventListener('click', ev=>{
+  const p=pick(ev); if(!p) return; const s={kind:'speaker', value:nameOf(p)};
+  if(keyOf(s)===keyOf(locked)){ locked=null; render(null); } else { locked=s; render(s); }
+});
+addEventListener('resize', ()=>{ const a=aspect();
+  perspCam.aspect=a; perspCam.updateProjectionMatrix();
+  orthoCam.left=-VIEW*a; orthoCam.right=VIEW*a; orthoCam.top=VIEW; orthoCam.bottom=-VIEW; orthoCam.updateProjectionMatrix();
+  renderer.setSize(app.clientWidth, app.clientHeight); lr.setSize(app.clientWidth, app.clientHeight); });
+(function loop(){ requestAnimationFrame(loop);
+  if(tw){ controls.enabled=false; tw.t=Math.min(1, tw.t+0.045); const e=tw.t*tw.t*(3-2*tw.t);
+    activeCam.position.lerpVectors(tw.fromP, tw.toP, e);
+    activeCam.up.lerpVectors(tw.fromU, tw.toU, e).normalize();
+    controls.target.lerpVectors(tw.fromT, tw.toT, e);
+    activeCam.zoom = tw.fromZ + (tw.toZ - tw.fromZ) * e;
+    activeCam.lookAt(controls.target);
+    activeCam.updateProjectionMatrix();
+    if(tw.t>=1){ tw=null; controls.enabled=true; controls.update(); programmatic=false; }
+  } else { controls.update(); }
+  stepHighlight();
+  renderer.render(scene,activeCam); lr.render(scene,activeCam); })();
+</script></body></html>

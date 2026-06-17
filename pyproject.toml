@@ -1,0 +1,21 @@
+[project]
+name = "lightning-talk-slide-analysis"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.109.2",
+    "google-api-python-client>=2.197.0",
+    "google-auth>=2.55.0",
+    "google-auth-oauthlib>=1.4.0",
+    "ipykernel>=7.3.0",
+    "matplotlib>=3.11.0",
+    "networkx>=3.6.1",
+    "openai>=2.41.1",
+    "pandas>=3.0.3",
+    "pip>=26.1.2",
+    "plotly>=6.8.0",
+    "pyvis>=0.3.2",
+    "requests>=2.34.2",
+]
