@@ -13,9 +13,12 @@
     border-radius:4px;padding:3px 7px;cursor:pointer;}
   #views button:hover{background:#2a2a33;color:#fff;}
   #views button.active{background:#3a3a46;color:#fff;border-color:#999;}
-  #stats{position:fixed;bottom:8px;right:12px;font-size:12px;color:#888;z-index:10;pointer-events:none;}
+  #stats{position:fixed;bottom:8px;left:12px;font-size:12px;color:#888;z-index:10;pointer-events:none;}
+  #credit{position:fixed;bottom:8px;right:12px;font-size:12px;color:#888;z-index:10;}
+  #credit a{color:#bbb;text-decoration:none;} #credit a:hover{color:#fff;}
 </style></head><body>
 <div id="app"></div><div id="tip"></div><div id="stats"></div>
+<div id="credit">DataViz by <a href="https://github.com/technickle" target="_blank" rel="noopener">@technickle</a> · AI-assisted analysis &amp; rendering</div>
 <div id="hint">x = date · y = speaker · z = topic · drag to orbit · hover for description · click a node or a topic label to lock</div>
 <div id="views">
   <button data-v="speakers">date × speaker (1)</button><button data-v="speakertopic">speaker × topic (2)</button>
