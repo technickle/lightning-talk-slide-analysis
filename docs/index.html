@@ -13,8 +13,9 @@
     border-radius:4px;padding:3px 7px;cursor:pointer;}
   #views button:hover{background:#2a2a33;color:#fff;}
   #views button.active{background:#3a3a46;color:#fff;border-color:#999;}
+  #stats{position:fixed;bottom:8px;right:12px;font-size:12px;color:#888;z-index:10;pointer-events:none;}
 </style></head><body>
-<div id="app"></div><div id="tip"></div>
+<div id="app"></div><div id="tip"></div><div id="stats"></div>
 <div id="hint">x = date · y = speaker · z = topic · drag to orbit · hover for description · click a node or a topic label to lock</div>
 <div id="views">
   <button data-v="speakers">date × speaker (1)</button><button data-v="speakertopic">speaker × topic (2)</button>
@@ -34,6 +35,8 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const D = window.TALK_DATA;
+document.getElementById('stats').textContent =
+  D.speakers.length + ' speakers · ' + new Set(D.talks.map(t=>t.idx)).size + ' talks';
 const W=160, DEP=120, H=90, xmin=D.xmin, xmax=D.xmax, nY=D.nY, nZ=D.nZ;
 const sx = v => ((xmax>xmin)?(v-xmin)/(xmax-xmin):0.5)*W - W/2;   // date   -> world X
 const sy = v => ((nY>1)?v/(nY-1):0.5)*DEP - DEP/2;               // speaker-> world Z
