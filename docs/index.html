@@ -93,15 +93,32 @@ const _sph=new THREE.Spherical(), _q=new THREE.Quaternion(), _qi=new THREE.Quate
 const _off=new THREE.Vector3(), _Y=new THREE.Vector3(0,1,0);
 let vTh=0.0010, vPh=0.0004, vR=0, vZ=0;
 const A_MAXTH=0.0026, A_MAXPH=0.0015, A_ACC=0.000024;   // angular speed caps + drift
-const A_MAXVR=0.10, A_RACC=0.012;                       // perspective radius (zoom) drift
+const A_MAXVR=0.025, A_RACC=0.0025;                     // perspective radius (zoom) drift — gentle
 const A_MAXVZ=0.0016, A_ZACC=0.0004;                    // orthographic zoom drift
-function startAuto(){ tw=null; auto=true; setActiveBtn('auto'); controls.enabled=true;
-  vTh=0.0010; vPh=0.0004; vR=0; vZ=0;
-  isOrtho = !!activeCam.isOrthographicCamera;
-  // band the zoom around wherever we are right now, so entering auto never snaps
-  if(isOrtho){ const z=activeCam.zoom; zMin=z*0.75; zMax=z*1.35; }
-  else { const r=activeCam.position.distanceTo(controls.target); zMin=r*0.7; zMax=r*1.5; }
+function startAuto(){ setActiveBtn('auto');
+  if(activeCam.isOrthographicCamera){
+    // smoothly morph the flat ortho view into a perspective orbit:
+    // start the persp cam far away + zoomed so it matches the current frame (≈no jump),
+    // then dolly in + tilt to a 3/4 view and begin orbiting.
+    const dir = activeCam.position.clone().sub(controls.target).normalize();
+    const vh = VIEW / activeCam.zoom;                              // current visible half-height
+    const dStart = 1000, zStart = dStart*Math.tan(perspCam.fov*Math.PI/360)/vh;
+    const upNow = activeCam.up.clone();
+    useCam(perspCam);
+    perspCam.up.copy(upNow);
+    perspCam.position.copy(controls.target).add(dir.multiplyScalar(dStart));
+    perspCam.zoom = zStart; perspCam.updateProjectionMatrix();
+    const toDir = new THREE.Vector3(0.55, 0.7, 0.9).normalize();
+    auto=false;
+    tw={ t:0, spd:0.02,
+         fromP:perspCam.position.clone(), toP:controls.target.clone().add(toDir.multiplyScalar(220)),
+         fromU:perspCam.up.clone(),       toU:new THREE.Vector3(0,1,0),
+         fromT:controls.target.clone(),   toT:controls.target.clone(),
+         fromZ:zStart,                    toZ:1, onDone:beginOrbit };
+  } else { beginOrbit(); }
 }
+function beginOrbit(){ auto=true; isOrtho=false; vTh=0.0010; vPh=0.0004; vR=0; vZ=0;
+  const r=activeCam.position.distanceTo(controls.target); zMin=r*0.8; zMax=r*1.28; }
 function autoStep(){
   vTh=Math.max(-A_MAXTH, Math.min(A_MAXTH, (vTh+(Math.random()-0.5)*A_ACC)*0.9997));
   vPh=Math.max(-A_MAXPH, Math.min(A_MAXPH, (vPh+(Math.random()-0.5)*A_ACC*0.6)*0.9997));
@@ -275,14 +292,14 @@ addEventListener('resize', ()=>{ const a=aspect();
   orthoCam.left=-VIEW*a; orthoCam.right=VIEW*a; orthoCam.top=VIEW; orthoCam.bottom=-VIEW; orthoCam.updateProjectionMatrix();
   renderer.setSize(app.clientWidth, app.clientHeight); lr.setSize(app.clientWidth, app.clientHeight); });
 (function loop(){ requestAnimationFrame(loop);
-  if(tw){ controls.enabled=false; tw.t=Math.min(1, tw.t+0.045); const e=tw.t*tw.t*(3-2*tw.t);
+  if(tw){ controls.enabled=false; tw.t=Math.min(1, tw.t+(tw.spd||0.045)); const e=tw.t*tw.t*(3-2*tw.t);
     activeCam.position.lerpVectors(tw.fromP, tw.toP, e);
     activeCam.up.lerpVectors(tw.fromU, tw.toU, e).normalize();
     controls.target.lerpVectors(tw.fromT, tw.toT, e);
     activeCam.zoom = tw.fromZ + (tw.toZ - tw.fromZ) * e;
     activeCam.lookAt(controls.target);
     activeCam.updateProjectionMatrix();
-    if(tw.t>=1){ tw=null; controls.enabled=true; controls.update(); }
+    if(tw.t>=1){ const done=tw.onDone; tw=null; controls.enabled=true; controls.update(); if(done) done(); }
   } else if(auto && !dragging){ autoStep(); }
   else { controls.update(); }
   stepHighlight();
