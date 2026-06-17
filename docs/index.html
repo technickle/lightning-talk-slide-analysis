@@ -89,15 +89,15 @@ function applyView(v){ const V=VIEWS[v]; if(!V) return; auto=false; setActiveBtn
 // --- auto orbit: slow, wandering camera until the user interacts ---
 let auto=false;
 const _sph=new THREE.Spherical(); let vTh=0.0010, vPh=0.0004, vR=0;
-const A_MAXTH=0.0026, A_MAXPH=0.0015, A_ACC=0.00012, A_RMIN=130, A_RMAX=300, A_MAXVR=0.5;
+const A_MAXTH=0.0026, A_MAXPH=0.0015, A_ACC=0.000024, A_RMIN=130, A_RMAX=300, A_MAXVR=0.10, A_RACC=0.012;
 function startAuto(){ tw=null; auto=true; setActiveBtn('auto'); useCam(perspCam); controls.enabled=true;
   perspCam.up.set(0,1,0);
   _sph.setFromVector3(perspCam.position.clone().sub(controls.target));
   _sph.radius=Math.min(A_RMAX, Math.max(A_RMIN, _sph.radius)); }
 function autoStep(){   // drift the angular/radial velocities (bounded) so the motion keeps re-aiming
-  vTh=Math.max(-A_MAXTH, Math.min(A_MAXTH, (vTh+(Math.random()-0.5)*A_ACC)*0.999));
-  vPh=Math.max(-A_MAXPH, Math.min(A_MAXPH, (vPh+(Math.random()-0.5)*A_ACC*0.6)*0.999));
-  vR =Math.max(-A_MAXVR, Math.min(A_MAXVR, (vR +(Math.random()-0.5)*0.06)*0.99));
+  vTh=Math.max(-A_MAXTH, Math.min(A_MAXTH, (vTh+(Math.random()-0.5)*A_ACC)*0.9997));
+  vPh=Math.max(-A_MAXPH, Math.min(A_MAXPH, (vPh+(Math.random()-0.5)*A_ACC*0.6)*0.9997));
+  vR =Math.max(-A_MAXVR, Math.min(A_MAXVR, (vR +(Math.random()-0.5)*A_RACC)*0.997));
   _sph.theta+=vTh; _sph.phi+=vPh; _sph.radius+=vR;
   if(_sph.phi<0.35){ _sph.phi=0.35; vPh=Math.abs(vPh); }                 // bounce off the poles
   if(_sph.phi>Math.PI-0.35){ _sph.phi=Math.PI-0.35; vPh=-Math.abs(vPh); }
