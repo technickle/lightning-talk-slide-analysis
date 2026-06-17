@@ -16,6 +16,10 @@
   #stats{position:fixed;bottom:8px;left:12px;font-size:12px;color:#888;z-index:10;pointer-events:none;}
   #credit{position:fixed;bottom:8px;right:12px;font-size:12px;color:#888;z-index:10;}
   #credit a{color:#bbb;text-decoration:none;} #credit a:hover{color:#fff;}
+  .tip2{pointer-events:none;background:rgba(20,20,24,.96);border:1px solid #555;border-radius:6px;
+    padding:6px 8px;font-size:12px;max-width:300px;color:#eee;box-shadow:0 2px 10px rgba(0,0,0,.5);
+    animation:fin .6s ease both;}
+  @keyframes fin{from{opacity:0}to{opacity:1}}
 </style></head><body>
 <div id="app"></div><div id="tip"></div><div id="stats"></div>
 <div id="credit">DataViz by <a href="https://github.com/technickle/lightning-talk-slide-analysis" target="_blank" rel="noopener">@technickle</a> · AI-assisted analysis &amp; rendering</div>
@@ -95,6 +99,7 @@ function applyView(v){ const V=VIEWS[v]; if(!V) return; auto=false; setActiveBtn
 // --- auto orbit: slow, wandering camera; orbits the CURRENT camera (persp or ortho)
 //     exactly like a drag would, so entering from any preset never jumps ---
 let auto=false, isOrtho=false, zMin=0, zMax=0;
+let lastActive=performance.now(), showcaseObj=null, showcaseNext=0, lastShow=-1;   // idle talk-label showcase
 const _sph=new THREE.Spherical(), _q=new THREE.Quaternion(), _qi=new THREE.Quaternion();
 const _off=new THREE.Vector3(), _Y=new THREE.Vector3(0,1,0);
 let vTh=0.0010, vPh=0.0004, vR=0, vZ=0;
@@ -107,6 +112,11 @@ function startAuto(){ setActiveBtn('auto');
 }
 function beginOrbit(){ auto=true; isOrtho=false; vTh=0.0010; vPh=0.0004; vR=0; vZ=0;
   const r=activeCam.position.distanceTo(controls.target); zMin=r*0.8; zMax=r*1.28; }
+function makeLabel(i){   // floating talk label anchored at the dot (tracks with the orbit)
+  const t=D.talks[i], d=document.createElement('div'); d.className='tip2';
+  d.innerHTML=(t.summary||'(no description)')+'<br><i>'+t.spk+' · '+fmtDate(t.date)+' · '+t.topic+'</i>';
+  const o=new CSS2DObject(d); o.position.set(tpos[i*3],tpos[i*3+1],tpos[i*3+2]); scene.add(o); return o;
+}
 function toPerspective(done, spd){   // "inflate" the current flat ortho view into the same view in perspective
   const dir = activeCam.position.clone().sub(controls.target).normalize();
   const vh = VIEW / activeCam.zoom, dStart = 1000;
@@ -147,7 +157,7 @@ function autoStep(){
 const go = v => v==='auto' ? startAuto() : applyView(v);
 
 // real user interaction (drag/zoom/click) stops auto and un-highlights the preset; our tween doesn't
-controls.addEventListener('start', ()=>{ dragging=true; if(auto){ auto=false; clearActiveBtn(); } });
+controls.addEventListener('start', ()=>{ dragging=true; lastActive=performance.now(); if(auto){ auto=false; clearActiveBtn(); } });
 controls.addEventListener('end',   ()=>{ dragging=false; });
 controls.addEventListener('change', ()=>{
   if(!dragging) return;
@@ -280,6 +290,7 @@ function pick(ev){ const r=renderer.domElement.getBoundingClientRect();
   return null; }
 const nameOf = p => p.kind==='speaker' ? D.speakers[p.i].name : D.talks[p.i].sp;
 renderer.domElement.addEventListener('pointermove', ev=>{
+  lastActive=performance.now();
   const p=pick(ev);
   if(p){ tip.innerHTML = p.kind==='speaker'
       ? '<b>'+D.speakers[p.i].name+'</b><br>'+D.speakers[p.i].talks+' talks'+(D.speakers[p.i].blurb?'<br><i>'+D.speakers[p.i].blurb+'</i>':'')
@@ -307,6 +318,15 @@ addEventListener('resize', ()=>{ const a=aspect();
     if(tw.t>=1){ const done=tw.onDone; tw=null; controls.enabled=true; controls.update(); if(done) done(); }
   } else if(auto && !dragging){ autoStep(); }
   else { controls.update(); }
+  // idle showcase: after 60s idle in auto, pop a random talk label, swap every ~30s
+  const _now=performance.now();
+  if(auto && _now-lastActive>60000){
+    if(_now>=showcaseNext){
+      if(showcaseObj) scene.remove(showcaseObj);
+      let i; do { i=Math.floor(Math.random()*N); } while(N>1 && i===lastShow);
+      lastShow=i; showcaseObj=makeLabel(i); showcaseNext=_now+30000;
+    }
+  } else if(showcaseObj){ scene.remove(showcaseObj); showcaseObj=null; showcaseNext=0; }
   stepHighlight();
   renderer.render(scene,activeCam); lr.render(scene,activeCam); })();
 </script></body></html>
