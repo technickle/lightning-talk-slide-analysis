@@ -110,7 +110,7 @@ function startAuto(){ setActiveBtn('auto');
     perspCam.zoom = zStart; perspCam.updateProjectionMatrix();
     const toDir = new THREE.Vector3(0.55, 0.7, 0.9).normalize();
     auto=false;
-    tw={ t:0, spd:0.02,
+    tw={ t:0, spd:0.002,
          fromP:perspCam.position.clone(), toP:controls.target.clone().add(toDir.multiplyScalar(220)),
          fromU:perspCam.up.clone(),       toU:new THREE.Vector3(0,1,0),
          fromT:controls.target.clone(),   toT:controls.target.clone(),
