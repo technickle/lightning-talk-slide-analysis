@@ -86,24 +86,45 @@ function applyView(v){ const V=VIEWS[v]; if(!V) return; auto=false; setActiveBtn
        fromU:activeCam.up.clone(),            toU:new THREE.Vector3(...V.up),
        fromT:controls.target.clone(),         toT:new THREE.Vector3(0,0,0),
        fromZ:activeCam.zoom,                  toZ:zoom }; }
-// --- auto orbit: slow, wandering camera until the user interacts ---
-let auto=false;
-const _sph=new THREE.Spherical(); let vTh=0.0010, vPh=0.0004, vR=0;
-const A_MAXTH=0.0026, A_MAXPH=0.0015, A_ACC=0.000024, A_RMIN=130, A_RMAX=300, A_MAXVR=0.10, A_RACC=0.012;
-function startAuto(){ tw=null; auto=true; setActiveBtn('auto'); useCam(perspCam); controls.enabled=true;
-  perspCam.up.set(0,1,0);
-  _sph.setFromVector3(perspCam.position.clone().sub(controls.target));
-  _sph.radius=Math.min(A_RMAX, Math.max(A_RMIN, _sph.radius)); }
-function autoStep(){   // drift the angular/radial velocities (bounded) so the motion keeps re-aiming
+// --- auto orbit: slow, wandering camera; orbits the CURRENT camera (persp or ortho)
+//     exactly like a drag would, so entering from any preset never jumps ---
+let auto=false, isOrtho=false, zMin=0, zMax=0;
+const _sph=new THREE.Spherical(), _q=new THREE.Quaternion(), _qi=new THREE.Quaternion();
+const _off=new THREE.Vector3(), _Y=new THREE.Vector3(0,1,0);
+let vTh=0.0010, vPh=0.0004, vR=0, vZ=0;
+const A_MAXTH=0.0026, A_MAXPH=0.0015, A_ACC=0.000024;   // angular speed caps + drift
+const A_MAXVR=0.10, A_RACC=0.012;                       // perspective radius (zoom) drift
+const A_MAXVZ=0.0016, A_ZACC=0.0004;                    // orthographic zoom drift
+function startAuto(){ tw=null; auto=true; setActiveBtn('auto'); controls.enabled=true;
+  vTh=0.0010; vPh=0.0004; vR=0; vZ=0;
+  isOrtho = !!activeCam.isOrthographicCamera;
+  // band the zoom around wherever we are right now, so entering auto never snaps
+  if(isOrtho){ const z=activeCam.zoom; zMin=z*0.75; zMax=z*1.35; }
+  else { const r=activeCam.position.distanceTo(controls.target); zMin=r*0.7; zMax=r*1.5; }
+}
+function autoStep(){
   vTh=Math.max(-A_MAXTH, Math.min(A_MAXTH, (vTh+(Math.random()-0.5)*A_ACC)*0.9997));
   vPh=Math.max(-A_MAXPH, Math.min(A_MAXPH, (vPh+(Math.random()-0.5)*A_ACC*0.6)*0.9997));
-  vR =Math.max(-A_MAXVR, Math.min(A_MAXVR, (vR +(Math.random()-0.5)*A_RACC)*0.997));
-  _sph.theta+=vTh; _sph.phi+=vPh; _sph.radius+=vR;
-  if(_sph.phi<0.35){ _sph.phi=0.35; vPh=Math.abs(vPh); }                 // bounce off the poles
+  // orbit in the camera's own up-frame (same math as OrbitControls -> seamless from any view)
+  _q.setFromUnitVectors(activeCam.up, _Y); _qi.copy(_q).invert();
+  _off.copy(activeCam.position).sub(controls.target).applyQuaternion(_q);
+  _sph.setFromVector3(_off);
+  _sph.theta += vTh; _sph.phi += vPh;
+  if(_sph.phi<0.35){ _sph.phi=0.35; vPh=Math.abs(vPh); }
   if(_sph.phi>Math.PI-0.35){ _sph.phi=Math.PI-0.35; vPh=-Math.abs(vPh); }
-  if(_sph.radius<A_RMIN){ _sph.radius=A_RMIN; vR=Math.abs(vR); }         // and the zoom limits
-  if(_sph.radius>A_RMAX){ _sph.radius=A_RMAX; vR=-Math.abs(vR); }
-  perspCam.position.setFromSpherical(_sph).add(controls.target); perspCam.lookAt(controls.target);
+  if(isOrtho){                                          // ortho: drift the zoom, not the distance
+    vZ=Math.max(-A_MAXVZ, Math.min(A_MAXVZ, (vZ+(Math.random()-0.5)*A_ZACC)*0.997));
+    let z=activeCam.zoom+vZ;
+    if(z<zMin){ z=zMin; vZ=Math.abs(vZ); } if(z>zMax){ z=zMax; vZ=-Math.abs(vZ); }
+    activeCam.zoom=z; activeCam.updateProjectionMatrix();
+  } else {                                              // perspective: drift the radius
+    vR=Math.max(-A_MAXVR, Math.min(A_MAXVR, (vR+(Math.random()-0.5)*A_RACC)*0.997));
+    _sph.radius+=vR;
+    if(_sph.radius<zMin){ _sph.radius=zMin; vR=Math.abs(vR); } if(_sph.radius>zMax){ _sph.radius=zMax; vR=-Math.abs(vR); }
+  }
+  _off.setFromSpherical(_sph).applyQuaternion(_qi);
+  activeCam.position.copy(controls.target).add(_off);
+  activeCam.lookAt(controls.target);
 }
 const go = v => v==='auto' ? startAuto() : applyView(v);
 
