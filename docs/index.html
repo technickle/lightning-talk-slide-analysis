@@ -17,8 +17,8 @@
 <div id="app"></div><div id="tip"></div>
 <div id="hint">x = date · y = speaker · z = topic · drag to orbit · hover for description · click a node or a topic label to lock</div>
 <div id="views">
-  <button data-v="iso">reset (0)</button><button data-v="speakers">speaker × date (1)</button>
-  <button data-v="datetopic">date × topic (2)</button><button data-v="speakertopic">speaker × topic (3)</button>
+  <button data-v="speakers">date × speaker (1)</button><button data-v="speakertopic">speaker × topic (2)</button>
+  <button data-v="datetopic">date × topic (3)</button><button data-v="iso">reset (0)</button>
 </div>
 
 <!-- data emitted by the notebook (window.TALK_DATA) -->
@@ -75,21 +75,24 @@ const VIEWS = {
   speakertopic: {cam:'ortho', pos:[1000, 0, 0],  up:[0,1,0],  hw:DEP/2, hh:H/2},    // side: speaker vs topic
 };
 const MARGIN=1.16;
-let tw=null, currentPreset=null, programmatic=false;
+let tw=null, currentPreset=null, dragging=false;
 const allBtns=()=>document.querySelectorAll('#views button');
 function setActiveBtn(v){ currentPreset=v; allBtns().forEach(b=> b.classList.toggle('active', b.dataset.v===v)); }
 function clearActiveBtn(){ currentPreset=null; allBtns().forEach(b=> b.classList.remove('active')); }
-function applyView(v){ const V=VIEWS[v]; if(!V) return; programmatic=true; setActiveBtn(v);
+function applyView(v){ const V=VIEWS[v]; if(!V) return; setActiveBtn(v);
   useCam(V.cam==='ortho'?orthoCam:perspCam);
   const zoom = V.cam==='ortho' ? Math.min(VIEW/(V.hh*MARGIN), VIEW*aspect()/(V.hw*MARGIN)) : 1;
   tw={ t:0, fromP:activeCam.position.clone(), toP:new THREE.Vector3(...V.pos),
        fromU:activeCam.up.clone(),            toU:new THREE.Vector3(...V.up),
        fromT:controls.target.clone(),         toT:new THREE.Vector3(0,0,0),
        fromZ:activeCam.zoom,                  toZ:zoom }; }
-// a user-driven camera change (drag/zoom) un-highlights the preset; our own tween doesn't
-controls.addEventListener('change', ()=>{ if(!programmatic && currentPreset) clearActiveBtn(); });
+// clear the preset highlight only on a real user drag/zoom (a camera change WHILE interacting) —
+// not our programmatic tween, and not a plain node click (start with no movement).
+controls.addEventListener('start', ()=>{ dragging=true; });
+controls.addEventListener('end',   ()=>{ dragging=false; });
+controls.addEventListener('change',()=>{ if(dragging && currentPreset) clearActiveBtn(); });
 document.querySelectorAll('#views button').forEach(b=> b.addEventListener('click', ()=> applyView(b.dataset.v)));
-addEventListener('keydown', e=>{ const m={'0':'iso','1':'speakers','2':'datetopic','3':'speakertopic'}[e.key];
+addEventListener('keydown', e=>{ const m={'0':'iso','1':'speakers','2':'speakertopic','3':'datetopic'}[e.key];
   if(m) applyView(m); });
 applyView('iso');   // start on the reset view + highlight its button
 
@@ -238,7 +241,7 @@ addEventListener('resize', ()=>{ const a=aspect();
     activeCam.zoom = tw.fromZ + (tw.toZ - tw.fromZ) * e;
     activeCam.lookAt(controls.target);
     activeCam.updateProjectionMatrix();
-    if(tw.t>=1){ tw=null; controls.enabled=true; controls.update(); programmatic=false; }
+    if(tw.t>=1){ tw=null; controls.enabled=true; controls.update(); }
   } else { controls.update(); }
   stepHighlight();
   renderer.render(scene,activeCam); lr.render(scene,activeCam); })();
